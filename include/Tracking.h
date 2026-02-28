@@ -328,6 +328,11 @@ protected:
 
     bool mbCreatedMap;
 
+    // Relocalization seed: when atlas is loaded, attempt reloc before
+    // StereoInitialization to seed the initial pose at the correct position.
+    bool mbRelocPoseAvailable{false};
+    Sophus::SE3f mRelocPoseTcw;
+
     //Motion Model
     bool mbVelocity{false};
     Sophus::SE3f mVelocity;

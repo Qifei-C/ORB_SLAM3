@@ -1898,6 +1898,28 @@ void Tracking::Track()
 
     if(mState==NOT_INITIALIZED)
     {
+        // If atlas was loaded and current map has keyframes, attempt relocalization
+        // to seed StereoInitialization with the correct pose instead of origin.
+        if(!mbRelocPoseAvailable && pCurrentMap->KeyFramesInMap() > 0)
+        {
+            mCurrentFrame.ComputeBoW();
+            bool bReloc = Relocalization();
+            if(bReloc)
+            {
+                mbRelocPoseAvailable = true;
+                mRelocPoseTcw = mCurrentFrame.GetPose();
+                Verbose::PrintMess("Atlas reloc seed: pose acquired, will use for initialization",
+                    Verbose::VERBOSITY_NORMAL);
+            }
+            else
+            {
+                Verbose::PrintMess("Atlas reloc seed: no match yet, retrying next frame",
+                    Verbose::VERBOSITY_NORMAL);
+                mLastFrame = Frame(mCurrentFrame);
+                return;
+            }
+        }
+
         if(mSensor==System::STEREO || mSensor==System::RGBD || mSensor==System::IMU_STEREO || mSensor==System::IMU_RGBD)
         {
             StereoInitialization();
@@ -2358,17 +2380,40 @@ void Tracking::StereoInitialization()
             mCurrentFrame.mpImuPreintegrated = mpImuPreintegratedFromLastKF;
         }
 
-        // Set Frame pose to the origin (In case of inertial SLAM to imu)
-        if (mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD)
+        // Set Frame pose: use relocalized pose if available, otherwise origin
+        if(mbRelocPoseAvailable)
         {
-            Eigen::Matrix3f Rwb0 = mCurrentFrame.mImuCalib.mTcb.rotationMatrix();
-            Eigen::Vector3f twb0 = mCurrentFrame.mImuCalib.mTcb.translation();
-            Eigen::Vector3f Vwb0;
-            Vwb0.setZero();
-            mCurrentFrame.SetImuPoseVelocity(Rwb0, twb0, Vwb0);
+            if (mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD)
+            {
+                // Convert camera pose Tcw to body (IMU) frame: Twb = Twc * Tcb
+                Sophus::SE3f Twc = mRelocPoseTcw.inverse();
+                Sophus::SE3f Tcb = mCurrentFrame.mImuCalib.mTcb;
+                Sophus::SE3f Twb = Twc * Tcb;
+                Eigen::Vector3f Vwb0;
+                Vwb0.setZero();
+                mCurrentFrame.SetImuPoseVelocity(Twb.rotationMatrix(), Twb.translation(), Vwb0);
+            }
+            else
+            {
+                mCurrentFrame.SetPose(mRelocPoseTcw);
+            }
+            Verbose::PrintMess("StereoInitialization: using relocalized pose", Verbose::VERBOSITY_NORMAL);
+            mbRelocPoseAvailable = false; // consumed
         }
         else
-            mCurrentFrame.SetPose(Sophus::SE3f());
+        {
+            // Default: set pose to origin
+            if (mSensor == System::IMU_STEREO || mSensor == System::IMU_RGBD)
+            {
+                Eigen::Matrix3f Rwb0 = mCurrentFrame.mImuCalib.mTcb.rotationMatrix();
+                Eigen::Vector3f twb0 = mCurrentFrame.mImuCalib.mTcb.translation();
+                Eigen::Vector3f Vwb0;
+                Vwb0.setZero();
+                mCurrentFrame.SetImuPoseVelocity(Rwb0, twb0, Vwb0);
+            }
+            else
+                mCurrentFrame.SetPose(Sophus::SE3f());
+        }
 
         // Create KeyFrame
         KeyFrame* pKFini = new KeyFrame(mCurrentFrame,mpAtlas->GetCurrentMap(),mpKeyFrameDB);
@@ -2722,6 +2767,9 @@ void Tracking::CheckReplacedInLastFrame()
 
 bool Tracking::TrackReferenceKeyFrame()
 {
+    if(!mpReferenceKF)
+        return false;
+
     // Compute Bag of Words vector
     mCurrentFrame.ComputeBoW();
 
@@ -2785,6 +2833,8 @@ void Tracking::UpdateLastFrame()
 {
     // Update pose according to reference keyframe
     KeyFrame* pRef = mLastFrame.mpReferenceKF;
+    if(!pRef)
+        return;
     Sophus::SE3f Tlr = mlRelativeFramePoses.back();
     mLastFrame.SetPose(Tlr * pRef->GetPose());
 
@@ -2860,6 +2910,8 @@ bool Tracking::TrackWithMotionModel()
 
     // Update last frame pose according to its reference keyframe
     // Create "visual odometry" points if in Localization Mode
+    if(!mLastFrame.mpReferenceKF)
+        return false;   // No valid reference KF (e.g. after map reset)
     UpdateLastFrame();
 
     if (mpAtlas->isImuInitialized() && (mCurrentFrame.mnId>mnLastRelocFrameId+mnFramesToResetIMU))

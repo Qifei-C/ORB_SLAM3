@@ -1435,9 +1435,12 @@ void System::SaveAtlas(int type){
         // Save the current session
         mpAtlas->PreSave();
 
-        string pathSaveFileName = "./";
-        pathSaveFileName = pathSaveFileName.append(mStrSaveAtlasToFile);
-        pathSaveFileName = pathSaveFileName.append(".osa");
+        string pathSaveFileName;
+        if(!mStrSaveAtlasToFile.empty() && mStrSaveAtlasToFile[0] == '/')
+            pathSaveFileName = mStrSaveAtlasToFile;
+        else
+            pathSaveFileName = "./" + mStrSaveAtlasToFile;
+        pathSaveFileName.append(".osa");
 
         string strVocabularyChecksum = CalculateCheckSum(mStrVocabularyFilePath,TEXT_FILE);
         std::size_t found = mStrVocabularyFilePath.find_last_of("/\\");
@@ -1474,9 +1477,12 @@ bool System::LoadAtlas(int type)
     string strFileVoc, strVocChecksum;
     bool isRead = false;
 
-    string pathLoadFileName = "./";
-    pathLoadFileName = pathLoadFileName.append(mStrLoadAtlasFromFile);
-    pathLoadFileName = pathLoadFileName.append(".osa");
+    string pathLoadFileName;
+    if(!mStrLoadAtlasFromFile.empty() && mStrLoadAtlasFromFile[0] == '/')
+        pathLoadFileName = mStrLoadAtlasFromFile;      // absolute path: use as-is
+    else
+        pathLoadFileName = "./" + mStrLoadAtlasFromFile; // relative path: prepend ./
+    pathLoadFileName.append(".osa");
 
     if(type == TEXT_FILE) // File text
     {

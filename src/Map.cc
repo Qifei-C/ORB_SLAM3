@@ -358,8 +358,21 @@ void Map::SetLastMapChange(int currentChangeId)
 
 void Map::PreSave(std::set<GeometricCamera*> &spCams)
 {
+    // Take snapshots under short lock, then release before heavy iteration
+    std::vector<MapPoint*> vpMapPoints;
+    std::vector<KeyFrame*> vpKeyFrames;
+    std::set<KeyFrame*> spKeyFrames;
+    std::set<MapPoint*> spMapPoints;
+    {
+        unique_lock<mutex> lock(mMutexMap);
+        vpMapPoints.assign(mspMapPoints.begin(), mspMapPoints.end());
+        vpKeyFrames.assign(mspKeyFrames.begin(), mspKeyFrames.end());
+        spKeyFrames = mspKeyFrames;
+        spMapPoints = mspMapPoints;
+    }
+
     int nMPWithoutObs = 0;
-    for(MapPoint* pMPi : mspMapPoints)
+    for(MapPoint* pMPi : vpMapPoints)
     {
         if(!pMPi || pMPi->isBad())
             continue;
@@ -390,24 +403,24 @@ void Map::PreSave(std::set<GeometricCamera*> &spCams)
 
     // Backup of MapPoints
     mvpBackupMapPoints.clear();
-    for(MapPoint* pMPi : mspMapPoints)
+    for(MapPoint* pMPi : vpMapPoints)
     {
         if(!pMPi || pMPi->isBad())
             continue;
 
         mvpBackupMapPoints.push_back(pMPi);
-        pMPi->PreSave(mspKeyFrames,mspMapPoints);
+        pMPi->PreSave(spKeyFrames, spMapPoints);
     }
 
     // Backup of KeyFrames
     mvpBackupKeyFrames.clear();
-    for(KeyFrame* pKFi : mspKeyFrames)
+    for(KeyFrame* pKFi : vpKeyFrames)
     {
         if(!pKFi || pKFi->isBad())
             continue;
 
         mvpBackupKeyFrames.push_back(pKFi);
-        pKFi->PreSave(mspKeyFrames,mspMapPoints, spCams);
+        pKFi->PreSave(spKeyFrames, spMapPoints, spCams);
     }
 
     mnBackupKFinitialID = -1;
